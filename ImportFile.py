@@ -1,3 +1,6 @@
+import os
+os.environ["CUDA_VISIBLE_DEVICES"] = "3"
+
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -5,13 +8,13 @@ import torch.utils
 import torch.utils.data
 from torch.utils.data import DataLoader
 from torchvision import transforms
+torch.set_num_threads(8)
 
 import scipy.io
 import sys
 import json
 import time
 import pprint
-import os
 
 import math
 import random
@@ -29,6 +32,8 @@ import colorsys
 from matplotlib import rc
 import seaborn as sns
 import pandas as pd
+# from bisect import bisect_left
+from scipy.stats import truncexpon
 
 from os import listdir
 from os.path import isfile, join
@@ -67,8 +72,9 @@ class bcolors:
     UNDERLINE = '\033[4m'
 
 
-import EquationModels.HeatEquation1D as Ec
+import EquationModels.IsothermalAtmoOnlyRayleigh as Ec
 
+import ObjectClass
 from ModelClassTorch2 import *
 from DatasetTorch2 import *
 

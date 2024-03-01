@@ -1,2 +1,6 @@
-.DS_*
-.idea
+.DS_S*
+EquationModels/*pyca*
+*pyca*
+**/*.ipynb_checkpoints/
+create_traindata.ipynb
+detailedAnalysis.ipynb
