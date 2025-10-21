@@ -8,23 +8,18 @@ os.environ['KMP_DUPLICATE_LIB_OK'] = 'True'
 def initialize_inputs(len_sys_argv):
     if len_sys_argv <= 2:
 
-        # Random Seed for sampling the dataset
         if len_sys_argv == 1:
             sampling_seed_ = 42
         else:
             sampling_seed_ = int(sys.argv[1])
 
-        # Number of training+validation points
-        n_coll_ = 32768*4*4#*4
-        n_u_ = 16384*4*4#*4
+        n_coll_ = 32768 * 4 * 4
+        n_u_ = 16384 * 4 * 4
         n_int_ = 0
 
-        # Only for Navier Stokes
         n_object = 0
         ob = None
 
-        # Additional Info
-        # folder_path_ = "1D"
         point_ = "uniform"
         validation_size_ = 0.0
         network_properties_ = {
@@ -37,43 +32,35 @@ def initialize_inputs(len_sys_argv):
             "epochs": 400,
             "activation": "tanh"
         }
-        
+
         if len_sys_argv == 1:
             retrain_ = 42
-            folder_path_ = f"models/RayleighOnly_lxlynorm_lowBC01_4+2x64_400x50_2"
+            folder_path_ = "models/RayleighOnly_hardBC_4+2x64_400x50_2"
         else:
-            retrain_ = int(sys.argv[1])+1
-            folder_path_ = f"models/HyperparameterSearch/IsothermalAtmoAlt_6x64_100x50_seed={sys.argv[1]}"
+            retrain_ = int(sys.argv[1]) + 1
+            folder_path_ = f"models/HyperparameterSearchHard/IsothermalAtmoAlt_6x64_100x50_seed={sys.argv[1]}"
 
         shuffle_ = False
 
     elif len_sys_argv == 17 or len_sys_argv == 13:
         print(sys.argv)
-        # Random Seed for sampling the dataset
         sampling_seed_ = int(sys.argv[1])
-
-        # Number of training+validation points
         n_coll_ = int(sys.argv[2])
         n_u_ = int(sys.argv[3])
         n_int_ = int(sys.argv[4])
 
-        # Only for Navier Stokes
         n_object = int(sys.argv[5])
         if sys.argv[6] == "None":
             ob = None
         else:
             ob = sys.argv[6]
 
-        # Additional Info
         folder_path_ = sys.argv[7]
         point_ = sys.argv[8]
         validation_size_ = float(sys.argv[9])
         network_properties_ = json.loads(sys.argv[10])
         retrain_ = sys.argv[11]
-        if sys.argv[12] == "false":
-            shuffle_ = False
-        else:
-            shuffle_ = True
+        shuffle_ = False if sys.argv[12] == "false" else True
     else:
         raise ValueError("One input is missing")
 
@@ -87,14 +74,12 @@ if Ec.extrema_values is not None:
     space_dimensions = Ec.space_dimensions
     time_dimension = Ec.time_dimensions
     parameter_dimensions = Ec.parameter_dimensions
-
     print(space_dimensions, time_dimension, parameter_dimensions)
 else:
     print("Using free shape. Make sure you have the functions:")
     print("     - add_boundary(n_samples)")
     print("     - add_collocation(n_samples)")
     print("in the Equation file")
-
     extrema = None
     space_dimensions = Ec.space_dimensions
     time_dimension = Ec.time_dimensions
@@ -108,14 +93,14 @@ except AttributeError:
     parameter_dimensions = 0
     type_point_param = None
 
-input_dimensions = Ec.input_dimensions #parameter_dimensions + time_dimension + space_dimensions
+input_dimensions = Ec.input_dimensions
 output_dimension = Ec.output_dimension
 
 print(input_dimensions)
 mode = "none"
-max_iter = 5000 # 50000
+max_iter = 5000
 if network_properties["epochs"] != 1:
-    max_iter = 50 # 1
+    max_iter = 50
 
 if Ob == "cylinder":
     solid_object = ObjectClass.Cylinder(N_object, 1, input_dimensions, time_dimension, extrema, 1, 0, 0)
@@ -190,8 +175,6 @@ print(parameter_dimensions)
 if batch_dim == "full":
     batch_dim = N_train
 
-# ##############################################################################################
-# Datasets Creation
 print("DIMENSION")
 print(space_dimensions, time_dimension, parameter_dimensions)
 training_set_class = DefineDataset(extrema,
@@ -214,14 +197,12 @@ training_set_class.assemble_dataset()
 training_set_no_batches = training_set_class.data_no_batches
 
 validation_set_class = None
-
 additional_models = None
 
-model = Pinns(input_dimension=input_dimensions, output_dimension=output_dimension,
-              network_properties=network_properties, additional_models=additional_models)
+model = PinnsHardBC(input_dimension=input_dimensions, output_dimension=output_dimension,
+                    network_properties=network_properties, additional_models=additional_models)
 torch.manual_seed(retrain)
 init_xavier(model)
-#model = torch.load("models/RayleighOnly_lxlynorm_lowBC01_4+2x64_400x20_1/TrainedModel/model.pkl")
 model.num_epochs = network_properties["epochs"]
 if torch.cuda.is_available():
     print("Loading model on GPU")
@@ -233,13 +214,11 @@ if torch.backends.mps.is_available():
 start = time.time()
 print("Fitting Model")
 model.train()
-epoch_ADAM = model.num_epochs  # stay on Adam; LBFGS expects full-batch losses
+epoch_ADAM = model.num_epochs
 
-# ##############################################################################################
-# Model Training
 optimizer_LBFGS = optim.LBFGS(model.parameters(), lr=0.8, max_iter=max_iter, max_eval=max_iter, history_size=100,
                               line_search_fn="strong_wolfe",
-                              tolerance_change=1.0 * np.finfo(float).eps) #, tolerance_grad=-1.0 * np.finfo(float).eps)
+                              tolerance_change=1.0 * np.finfo(float).eps)
 optimizer_ADAM = optim.Adam(model.parameters(), lr=1e-3)
 if N_coll_train != 0:
     final_error_train = fit(model, optimizer_ADAM, optimizer_LBFGS, epoch_ADAM, training_set_class, validation_set_clsss=validation_set_class, verbose=True,
@@ -249,7 +228,7 @@ else:
 end = time.time() - start
 
 print("\nTraining Time: ", end)
-#print("Final error: ", final_error_train)
+print("Final error: ", final_error_train)
 
 model = model.eval()
 try:
@@ -262,8 +241,6 @@ print("################################################")
 final_error_val = None
 final_error_test = 0
 
-# ##############################################################################################
-# Save Model
 os.mkdir(folder_path)
 model_path = folder_path + "/TrainedModel"
 os.mkdir(model_path)
