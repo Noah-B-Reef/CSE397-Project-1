@@ -88,7 +88,50 @@ class Pinns(nn.Module):
             
             return torch.cat([x,y], dim=-1)
         return x
-    
+
+class PinnsHardBC(Pinns):
+    """PINN variant whose forward pass enforces boundary conditions exactly."""
+
+    def forward(self, inputs):
+        raw = super().forward(inputs)
+        if raw.shape[-1] != 2:
+            raise ValueError("Hard boundary constraints require a 2-channel output.")
+
+        u_abs = raw[:, 0]
+        u_sca = raw[:, 1]
+
+        x_coord = inputs[:, 0]
+        y_coord = inputs[:, 1]
+        phi = inputs[:, 2] * pi
+        delta_norm = inputs[:, 6]
+
+        # Reconstruct Delta_* (half stellar angular extent) from the normalised input.
+        delta_star = delta_norm * (0.5 * Ec.Delta_star_max / pi) + (0.5 * Ec.Delta_star_max / pi)
+
+        tol = 1e-6
+        ones = torch.ones_like(u_abs)
+        zeros = torch.zeros_like(u_abs)
+
+        # x = -1, |phi| <= pi/2
+        mask_x_neg = torch.abs(x_coord + 1.0) <= tol
+        mask_phi_half = torch.abs(phi) <= (0.5 * pi)
+        mask_delta = torch.abs(phi) <= delta_star
+        boundary_value = torch.where(mask_delta, ones, zeros)
+        u_abs = torch.where(mask_x_neg & mask_phi_half, boundary_value, u_abs)
+
+        # y = 1, phi <= 0
+        mask_y_top = torch.abs(y_coord - 1.0) <= tol
+        mask_phi_nonpos = phi <= 0.0
+        boundary_value_top = torch.where(torch.abs(phi) <= delta_star, ones, zeros)
+        u_abs = torch.where(mask_y_top & mask_phi_nonpos, boundary_value_top, u_abs)
+
+        # x = 1, |phi| >= pi/2  --> scattering channel forced to zero
+        mask_x_pos = torch.abs(x_coord - 1.0) <= tol
+        mask_phi_ge_half = torch.abs(phi) >= (0.5 * pi)
+        u_sca = torch.where(mask_x_pos & mask_phi_ge_half, torch.zeros_like(u_sca), u_sca)
+
+        return torch.stack([u_abs, u_sca], dim=-1)
+
 class PinnsRes(nn.Module):
 
     def __init__(self, input_dimension, output_dimension, network_properties, additional_models=None,
@@ -167,9 +210,9 @@ def fit(model, optimizer_ADAM, optimizer_LBFGS, epoch_ADAM, training_set_class, 
             #current_lr = optimizer.param_groups[0]['lr']
             #print("learning rate, best, patience:", current_lr, scheduler.best, scheduler.num_bad_epochs)
 
-        #print(len(training_boundary))
+        #print("Training Boundary Length:", len(training_boundary))
         #print(len(training_coll))
-        #print(len(training_initial_internal))
+        #print("Training Initial Internal Length:", len(training_initial_internal))
 
         if len(training_boundary) != 0 and len(training_initial_internal) != 0:
             for step, ((x_coll_train_, u_coll_train_), (x_b_train_, u_b_train_), (x_u_train_, u_train_)) in enumerate(
@@ -187,13 +230,20 @@ def fit(model, optimizer_ADAM, optimizer_LBFGS, epoch_ADAM, training_set_class, 
                     x_u_train_ = x_u_train_.cuda()
                     u_train_ = u_train_.cuda()
 
+                if torch.backends.mps.is_available():
+                    x_coll_train_ = x_coll_train_.to("mps")
+                    x_b_train_ = x_b_train_.to("mps")
+                    u_b_train_ = u_b_train_.to("mps")
+                    x_u_train_ = x_u_train_.to("mps")
+                    u_train_ = u_train_.to("mps")
+
                 def closure():
                     optimizer.zero_grad()
                     loss_f = CustomLoss()(model, x_u_train_, u_train_, x_b_train_, u_b_train_, x_coll_train_, x_ob, u_ob,
                                           training_set_class, training_ic)
                     loss_f.backward()
                     train_losses[0] = loss_f
-                    # print(train_losses[0])
+                    #print('current loss: ', train_losses[0])
                     return loss_f
 
                 optimizer.step(closure=closure)
@@ -205,7 +255,17 @@ def fit(model, optimizer_ADAM, optimizer_LBFGS, epoch_ADAM, training_set_class, 
                     del x_u_train_
                     del u_train_
                     torch.cuda.empty_cache()
+                    
+                if torch.backends.mps.is_available():
+                    del x_coll_train_
+                    del x_b_train_
+                    del u_b_train_
+                    del x_u_train_
+                    del u_train_
+                    torch.mps.empty_cache()
+                    
         elif len(training_boundary) == 0 and len(training_initial_internal) != 0:
+            
             for step, ((x_coll_train_, u_coll_train_), (x_u_train_, u_train_)) in enumerate(zip(training_coll, training_initial_internal)):
 
                 x_ob = None
@@ -220,6 +280,13 @@ def fit(model, optimizer_ADAM, optimizer_LBFGS, epoch_ADAM, training_set_class, 
                     u_b_train_ = u_b_train_.cuda()
                     x_u_train_ = x_u_train_.cuda()
                     u_train_ = u_train_.cuda()
+                    
+                if torch.backends.mps.is_available():
+                    x_coll_train_ = x_coll_train_.to("mps")
+                    x_b_train_ = x_b_train_.to("mps")
+                    u_b_train_ = u_b_train_.to("mps")
+                    x_u_train_ = x_u_train_.to("mps")
+                    u_train_ = u_train_.to("mps")
 
                 def closure():
                     optimizer.zero_grad()
@@ -239,6 +306,13 @@ def fit(model, optimizer_ADAM, optimizer_LBFGS, epoch_ADAM, training_set_class, 
                     del x_u_train_
                     del u_train_
                     torch.cuda.empty_cache()
+                if torch.backends.mps.is_available():
+                    del x_coll_train_
+                    del x_b_train_
+                    del u_b_train_
+                    del x_u_train_
+                    del u_train_
+                    torch.mps.empty_cache()
                     
         elif len(training_boundary) != 0 and len(training_initial_internal) == 0:
             epoch = epoch + 0
@@ -263,6 +337,13 @@ def fit(model, optimizer_ADAM, optimizer_LBFGS, epoch_ADAM, training_set_class, 
                     x_u_train_ = x_u_train_.cuda()
                     u_train_ = u_train_.cuda()
 
+                if torch.backends.mps.is_available():
+                    x_coll_train_ = x_coll_train_.to("mps")
+                    x_b_train_ = x_b_train_.to("mps")
+                    u_b_train_ = u_b_train_.to("mps")
+                    x_u_train_ = x_u_train_.to("mps")
+                    u_train_ = u_train_.to("mps")
+
                 def closure():
                     optimizer.zero_grad()
                     loss_f = CustomLoss()(model, x_u_train_, u_train_, x_b_train_, u_b_train_, x_coll_train_, x_ob, u_ob,training_set_class, training_ic, epoch=epoch)
@@ -272,15 +353,18 @@ def fit(model, optimizer_ADAM, optimizer_LBFGS, epoch_ADAM, training_set_class, 
 
                     loss_f.backward()
                     train_losses[0] = loss_f
-                    # print(train_losses[0])
+                    #print('current loss: ',train_losses[0])
                     return loss_f
 
                 # Create a copy of the model's parameters before calling backward()
                 old_params = [param.clone().detach() for param in model.parameters()]
 
                 revert = False
+                optimizer.step(closure=closure)
+
                 try:
-                    optimizer.step(closure=closure)
+                    pass
+                    #optimizer.step(closure=closure)
                     #scheduler.step(train_losses[0].item())
                 except:
                     revert = True
@@ -299,9 +383,17 @@ def fit(model, optimizer_ADAM, optimizer_LBFGS, epoch_ADAM, training_set_class, 
                     del x_u_train_
                     del u_train_
                     torch.cuda.empty_cache()
+                    
+                if torch.backends.mps.is_available():
+                    del x_coll_train_
+                    del x_b_train_
+                    del u_b_train_
+                    del x_u_train_
+                    del u_train_
+                    torch.mps.empty_cache()
 
         if validation_set_clsss is not None:
-
+            
             N_coll_val = validation_set_clsss.n_collocation
             N_b_val = validation_set_clsss.n_boundary
             validation_set = validation_set_clsss.data_no_batches
@@ -321,6 +413,12 @@ def fit(model, optimizer_ADAM, optimizer_LBFGS, epoch_ADAM, training_set_class, 
                     u_b_val = u_b_val.cuda()
                     x_u_val = x_u_val.cuda()
                     u_val = u_val.cuda()
+                if torch.backends.mps.is_available():
+                    x_coll_val = x_coll_val.to("mps")
+                    x_b_val = x_b_val.to("mps")
+                    u_b_val = u_b_val.to("mps")
+                    x_u_val = x_u_val.to("mps")
+                    u_val = u_val.to("mps")
 
                 loss_val = CustomLoss()(model, x_u_val, u_val, x_b_val, u_b_val, x_coll_val, validation_set_clsss)
 
@@ -331,6 +429,13 @@ def fit(model, optimizer_ADAM, optimizer_LBFGS, epoch_ADAM, training_set_class, 
                     del x_u_val
                     del u_val
                     torch.cuda.empty_cache()
+                if torch.backends.mps.is_available():
+                    del x_coll_val
+                    del x_b_val
+                    del u_b_val
+                    del x_u_val
+                    del u_val
+                    torch.mps.empty_cache()
 
                     # val_losses.append(loss_val)
                 if verbose and epoch % 100 == 0:
@@ -562,7 +667,7 @@ class CustomLoss(torch.nn.Module):
         else:
             print("final loss:", loss_v.detach().cpu().numpy().round(4), " ", torch.log10(loss_vars).detach().cpu().numpy().round(4), " ",
               torch.log10(loss_res).detach().cpu().numpy().round(4))
-            # print(loss_vars.detach().cpu().numpy().round(5))
+            # print(loss_vars.detach().cpu().numpy().round())
         return loss_v
 
 
@@ -708,6 +813,9 @@ def StandardFit(model, optimizer_ADAM, optimizer_LBFGS, training_set_class, vali
             if torch.cuda.is_available():
                 x_u_train_ = x_u_train_.cuda()
                 u_train_ = u_train_.cuda()
+            if torch.backends.mps.is_available():
+                x_u_train_ = x_u_train_.to("mps")
+                u_train_ = u_train_.to("mps")
 
             def closure():
                 optimizer.zero_grad()
@@ -720,6 +828,9 @@ def StandardFit(model, optimizer_ADAM, optimizer_LBFGS, training_set_class, vali
 
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
+            if torch.backends.mps.is_available():
+                torch.mps.empty_cache()
+                
             del x_u_train_
             del u_train_
 
