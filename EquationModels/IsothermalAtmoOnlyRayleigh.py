@@ -34,9 +34,7 @@ n_quad_abs = 5  # number of integration points for absorption term (should be od
 n_quad_sca = 14 # number of integration points for scattering term
 
 if torch.cuda.is_available():
-    dev = torch.device("cuda")
-elif torch.backends.mps.is_available():
-    dev = torch.device("mps")
+    dev = torch.device('cuda')
 else:
     dev = torch.device("cpu")
     
@@ -379,7 +377,7 @@ def compute_res(network, x_f_train, space_dimensions, solid_object, computing_er
     l_y = 0.5*(r0-r99)
 
     #print(y.shape, l_x.shape, l_y.shape)
-    #print(torch.min(l_y/l_x), torch.max(l_y/l_x))
+    print(torch.min(l_y/l_x), torch.max(l_y/l_x))
     #y_norm = y * l_y/l_x
 
     rayScat_train = x_f_train[:,5].unsqueeze(1)
@@ -636,4 +634,5 @@ def apply_BC(x_boundary, u_boundary, model):
     u_pred = torch.cat([u_pred[:3*n,:], u_pred[4*n:6*n,:]], dim=0)
 
     return u_pred.reshape(-1), u_BC.reshape(-1)
+
 
