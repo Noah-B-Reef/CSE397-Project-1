@@ -34,7 +34,9 @@ n_quad_abs = 5  # number of integration points for absorption term (should be od
 n_quad_sca = 14 # number of integration points for scattering term
 
 if torch.cuda.is_available():
-    dev = torch.device('cuda')
+    dev = torch.device("cuda")
+elif torch.backends.mps.is_available():
+    dev = torch.device("mps")
 else:
     dev = torch.device("cpu")
     
@@ -634,5 +636,4 @@ def apply_BC(x_boundary, u_boundary, model):
     u_pred = torch.cat([u_pred[:3*n,:], u_pred[4*n:6*n,:]], dim=0)
 
     return u_pred.reshape(-1), u_BC.reshape(-1)
-
 
