@@ -8,6 +8,6 @@ pyDOE>=0.3.8
 scipy>=1.12.0
 seaborn>=0.13.2
 sobol_seq>=0.2.0
-torch>=2.0.0+cpu
-torchvision>=0.15.1+cpu
+torch==2.0.0+cpu
+torchvision==0.15.1+cpu
 tqdm>=4.65.0

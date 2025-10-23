@@ -33,7 +33,7 @@ def initialize_inputs(len_sys_argv):
             "residual_parameter": 0.5,
             "kernel_regularizer": 2,
             "regularization_parameter": 0,
-            "batch_size": 8192,
+            "batch_size": (n_coll_ + n_u_ + n_int_),
             "epochs": 400,
             "activation": "tanh"
         }
@@ -233,7 +233,7 @@ if torch.backends.mps.is_available():
 start = time.time()
 print("Fitting Model")
 model.train()
-epoch_ADAM = model.num_epochs  # stay on Adam; LBFGS expects full-batch losses
+epoch_ADAM = 0 # model.num_epochs
 
 # ##############################################################################################
 # Model Training
