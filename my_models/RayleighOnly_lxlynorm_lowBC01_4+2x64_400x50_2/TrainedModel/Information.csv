@@ -1,0 +1,2 @@
+hidden_layers,neurons,residual_parameter,kernel_regularizer,regularization_parameter,batch_size,epochs,activation
+4,64,0.5,2,0,8192,4000,tanh

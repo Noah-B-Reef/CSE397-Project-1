@@ -72,7 +72,8 @@ class bcolors:
     UNDERLINE = '\033[4m'
 
 
-import EquationModels.IsothermalAtmoOnlyRayleigh as Ec
+#import EquationModels.IsothermalAtmoOnlyRayleigh as Ec
+import EquationModels.IsothermalAtmo as Ec
 
 import ObjectClass
 from ModelClassTorch2 import *

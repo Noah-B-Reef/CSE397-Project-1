@@ -34,16 +34,16 @@ def initialize_inputs(len_sys_argv):
             "kernel_regularizer": 2,
             "regularization_parameter": 0,
             "batch_size": 8192,
-            "epochs": 400,
+            "epochs": 4000,
             "activation": "tanh"
         }
         
         if len_sys_argv == 1:
             retrain_ = 42
-            folder_path_ = f"models/RayleighOnly_lxlynorm_lowBC01_4+2x64_400x50_2"
+            folder_path_ = f"my_models/RayleighOnly_lxlynorm_lowBC01_4+2x64_400x50_2"
         else:
             retrain_ = int(sys.argv[1])+1
-            folder_path_ = f"models/HyperparameterSearch/IsothermalAtmoAlt_6x64_100x50_seed={sys.argv[1]}"
+            folder_path_ = f"my_models/HyperparameterSearch/IsothermalAtmoAlt_6x64_100x50_seed={sys.argv[1]}"
 
         shuffle_ = False
 

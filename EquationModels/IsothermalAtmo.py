@@ -30,7 +30,9 @@ ub_0 = 1.0
 r_jup_mean = 6991100000.0
 
 if torch.cuda.is_available():
-    dev = torch.device('cuda')
+    dev = torch.device("cuda")
+elif torch.backends.mps.is_available():
+    dev = torch.device("mps")
 else:
     dev = torch.device("cpu")
 
@@ -123,10 +125,18 @@ def r_isotherm(a, r_P0, gpu=True):
     - Tensor: Calculated isothermal radius values.
     """
     P0 = 0.01
-    if gpu:
-        pressures = torch.logspace(-6, 2, 100).unsqueeze(0).to(dev)
+    if torch.is_tensor(a):
+        device = a.device
+        dtype = a.dtype
+    elif torch.is_tensor(r_P0):
+        device = r_P0.device
+        dtype = r_P0.dtype
     else:
-        pressures = torch.logspace(-6, 2, 100).unsqueeze(0)
+        device = dev if gpu else torch.device("cpu")
+        dtype = torch.float32
+
+    log10_pressures = torch.linspace(-6, 2, 100, device=device, dtype=dtype)
+    pressures = torch.exp(log10_pressures * math.log(10.0)).unsqueeze(0)
     return r_P0 / (1 + ((a/r_P0)*torch.log(pressures/P0)))
 
 
@@ -334,6 +344,8 @@ def compute_res(network, x_f_train, space_dimensions, solid_object, computing_er
     r_pl = x_f_train[:, 2].unsqueeze(1)
     a = x_f_train[:, 3].unsqueeze(1)
 
+    a = torch.nan_to_num(a, nan=1e-8, posinf=1e8, neginf=1e-8)
+    a = torch.clamp_min(a, 1e-8)
     
     real_gen_radii = r_isotherm(a, r_pl)
     r_pl = ((r_pl / r_jup_mean) - 1.05) / 0.95
@@ -469,6 +481,8 @@ def apply_BC(x_boundary, u_boundary, model):
     y = x_BC[:, 1].unsqueeze(1)
     r_pl = x_BC[:, 2].unsqueeze(1)
     a = x_BC[:, 3].unsqueeze(1)
+    a = torch.nan_to_num(a, nan=1e-8, posinf=1e8, neginf=1e-8)
+    a = torch.clamp_min(a, 1e-8)
     
     real_gen_radii = r_isotherm(a, r_pl)
     r_pl = ((r_pl / r_jup_mean) - 1.05) / 0.95

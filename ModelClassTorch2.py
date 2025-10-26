@@ -57,7 +57,7 @@ class Pinns(nn.Module):
         self.activation = activation(self.act_string)
         # self.a = nn.Parameter(torch.tensor([1.0]))
         
-        self.addmask = True
+        self.addmask = False
         
         if self.addmask:
             #self.mu_max = torch.tensor([0.25]).to(Ec.dev)
@@ -90,47 +90,26 @@ class Pinns(nn.Module):
         return x
 
 class PinnsHardBC(Pinns):
-    """PINN variant whose forward pass enforces boundary conditions exactly."""
+    """PINN variant whose forward pass enforces the absorption-only boundary condition."""
 
     def forward(self, inputs):
         raw = super().forward(inputs)
-        if raw.shape[-1] != 2:
-            raise ValueError("Hard boundary constraints require a 2-channel output.")
+        if raw.shape[-1] != 1:
+            raise ValueError("Absorption hard boundary constraints expect a single-channel output.")
 
-        u_abs = raw[:, 0]
-        u_sca = raw[:, 1]
+        solution = raw.squeeze(-1)
 
         x_coord = inputs[:, 0]
-        y_coord = inputs[:, 1]
-        phi = inputs[:, 2] * pi
-        delta_norm = inputs[:, 6]
+        x_min_val = Ec.domain_values[0, 0]
+        if isinstance(x_min_val, torch.Tensor):
+            x_min = x_min_val.to(inputs.device, dtype=inputs.dtype)
+        else:
+            x_min = torch.tensor(x_min_val, device=inputs.device, dtype=inputs.dtype)
+        boundary_value = torch.as_tensor(Ec.ub_0, dtype=solution.dtype, device=solution.device)
 
-        # Reconstruct Delta_* (half stellar angular extent) from the normalised input.
-        delta_star = delta_norm * (0.5 * Ec.Delta_star_max / pi) + (0.5 * Ec.Delta_star_max / pi)
+        solution = boundary_value + (x_coord - x_min) * solution
 
-        tol = 1e-6
-        ones = torch.ones_like(u_abs)
-        zeros = torch.zeros_like(u_abs)
-
-        # x = -1, |phi| <= pi/2
-        mask_x_neg = torch.abs(x_coord + 1.0) <= tol
-        mask_phi_half = torch.abs(phi) <= (0.5 * pi)
-        mask_delta = torch.abs(phi) <= delta_star
-        boundary_value = torch.where(mask_delta, ones, zeros)
-        u_abs = torch.where(mask_x_neg & mask_phi_half, boundary_value, u_abs)
-
-        # y = 1, phi <= 0
-        mask_y_top = torch.abs(y_coord - 1.0) <= tol
-        mask_phi_nonpos = phi <= 0.0
-        boundary_value_top = torch.where(torch.abs(phi) <= delta_star, ones, zeros)
-        u_abs = torch.where(mask_y_top & mask_phi_nonpos, boundary_value_top, u_abs)
-
-        # x = 1, |phi| >= pi/2  --> scattering channel forced to zero
-        mask_x_pos = torch.abs(x_coord - 1.0) <= tol
-        mask_phi_ge_half = torch.abs(phi) >= (0.5 * pi)
-        u_sca = torch.where(mask_x_pos & mask_phi_ge_half, torch.zeros_like(u_sca), u_sca)
-
-        return torch.stack([u_abs, u_sca], dim=-1)
+        return solution.unsqueeze(-1)
 
 class PinnsRes(nn.Module):
 
@@ -182,7 +161,7 @@ class ResidualBlock(nn.Module):
 def fit(model, optimizer_ADAM, optimizer_LBFGS, epoch_ADAM, training_set_class, validation_set_clsss=None, verbose=False, training_ic=False):
     num_epochs = model.num_epochs
 
-    train_losses = list([np.NAN])
+    train_losses = list([np.nan])
     val_losses = list()
     freq = 50
 
@@ -622,6 +601,7 @@ class CustomLoss(torch.nn.Module):
             return None
 
         loss_vars = (torch.mean(abs(u_pred_tot_vars - u_train_tot_vars) ** 2))
+        loss_vars = torch.nan_to_num(loss_vars, nan=0.0, posinf=1e12, neginf=0.0)
         #print(torch.mean(abs(u_pred_tot_vars)))
         #print(torch.mean(abs(u_train_tot_vars)))
         #loss_vars = (abs(u_pred_tot_vars - u_train_tot_vars) ** 2)
@@ -639,6 +619,7 @@ class CustomLoss(torch.nn.Module):
                 res = res.cuda()
                 res_train = res_train.cuda()
 
+            res = torch.nan_to_num(res, nan=0.0, posinf=0.0, neginf=0.0)
             if Ec.resGrad:
                 loss_res_abs = abs(res[:,0])**2
                 loss_resGrad = torch.mean(abs(res[:,1:])**2, dim=-1)
@@ -651,22 +632,26 @@ class CustomLoss(torch.nn.Module):
                 loss_res = torch.sum(weights*loss_res)/torch.sum(weights)
             else:
                 loss_res = (torch.mean(loss_res))
+            loss_res = torch.nan_to_num(loss_res, nan=0.0, posinf=1e12, neginf=0.0)
 
             u_pred_var_list.append(res)
             u_train_var_list.append(res_train)
 
         loss_reg = regularization(network, order_regularizer)
+        loss_reg = torch.nan_to_num(loss_reg, nan=0.0, posinf=1e12, neginf=0.0)
+        eps = 1e-12
         if not training_ic:
-            loss_v = torch.log10(
-                loss_vars + lambda_residual * loss_res + lambda_reg * loss_reg)  # + lambda_reg/loss_reg
+            total_loss = loss_vars + lambda_residual * loss_res + lambda_reg * loss_reg + eps
         else:
-            loss_v = torch.log10(loss_vars + lambda_reg * loss_reg)
+            total_loss = loss_vars + lambda_reg * loss_reg + eps
+        total_loss = torch.nan_to_num(total_loss, nan=eps, posinf=1e12, neginf=eps)
+        loss_v = torch.log10(total_loss)
         if Ec.resGrad:
-            print("final loss:", loss_v.detach().cpu().numpy().round(4), " ", torch.log10(loss_vars).detach().cpu().numpy().round(4), " ",
-              torch.log10(torch.mean(loss_res_abs)).detach().cpu().numpy().round(4), " ", torch.log10(torch.mean(loss_resGrad)).detach().cpu().numpy().round(4))
+            print("final loss:", loss_v.detach().cpu().numpy().round(4), " ", torch.log10(loss_vars + eps).detach().cpu().numpy().round(4), " ",
+              torch.log10(torch.mean(loss_res_abs) + eps).detach().cpu().numpy().round(4), " ", torch.log10(torch.mean(loss_resGrad) + eps).detach().cpu().numpy().round(4))
         else:
-            print("final loss:", loss_v.detach().cpu().numpy().round(4), " ", torch.log10(loss_vars).detach().cpu().numpy().round(4), " ",
-              torch.log10(loss_res).detach().cpu().numpy().round(4))
+            print("final loss:", loss_v.detach().cpu().numpy().round(4), " ", torch.log10(loss_vars + eps).detach().cpu().numpy().round(4), " ",
+              torch.log10(loss_res + eps).detach().cpu().numpy().round(4))
             # print(loss_vars.detach().cpu().numpy().round())
         return loss_v
 
@@ -780,7 +765,10 @@ class StandardLoss(torch.nn.Module):
         plt.scatter(x_u_train[:, 1].detach().numpy(), grad_u_xxx.detach().numpy(), s=10, marker="v")
         plt.pause(0.0000001)
         plt.clf()
-        loss = torch.log10(torch.mean((u_train - u_pred) ** 2) + lambda_reg * loss_reg)
+        eps = 1e-12
+        loss_val = torch.mean((u_train - u_pred) ** 2) + lambda_reg * loss_reg + eps
+        loss_val = torch.nan_to_num(loss_val, nan=eps, posinf=1e12, neginf=eps)
+        loss = torch.log10(loss_val)
         del u_train, u_pred
         print(loss)
         return loss

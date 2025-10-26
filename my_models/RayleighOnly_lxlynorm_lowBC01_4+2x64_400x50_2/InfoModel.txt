@@ -1,0 +1,2 @@
+Nu_train,Nf_train,Nint_train,validation_size,train_time,error_train,error_val,error_test
+262144,524288,0,0.0,40001.604702949524,0.057449523359537125,None,0
