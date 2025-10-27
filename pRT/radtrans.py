@@ -18,7 +18,7 @@ from petitRADTRANS import _read_opacities
 from petitRADTRANS import fort_input as fi
 from petitRADTRANS import fort_rebin as fr
 from petitRADTRANS import fort_spec as fs
-from petitRADTRANS import nat_cst as nc
+from petitRADTRANS import physical_constants as nc
 # from petitRADTRANS import phoenix
 from petitRADTRANS import pyth_input as pyi
 
@@ -97,7 +97,7 @@ class Radtrans(_read_opacities.ReadOpacities):
                           f"Please set pRT_input_data_path variable in .bashrc / .bash_profile or specify path via\n"
                           f">>> import os"
                           f">>> os.environ['pRT_input_data_path'] = 'absolute/path/of/the/folder/input_data'\n"
-                          f"before creating a Radtrans object or loading the nat_cst module.\n"
+                          f"before creating a Radtrans object or loading the physical_constants module.\n"
                           f"(this will become unnecessary in a future update)"
                           )
         else:

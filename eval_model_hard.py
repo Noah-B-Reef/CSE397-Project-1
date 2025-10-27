@@ -3,8 +3,16 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib as mpl
 import torch
-from petitRADTRANS import Radtrans
-from petitRADTRANS import nat_cst as nc
+import inspect
+try:
+    from petitRADTRANS import Radtrans
+except ImportError:
+    from petitRADTRANS.radtrans import Radtrans
+
+try:
+    from petitRADTRANS import physical_constants as nc
+except ImportError:
+    import petitRADTRANS.physical_constants as nc
 from tqdm import tqdm
 import sys
 import os
@@ -26,26 +34,41 @@ else:
 true_transm = pd.read_hdf('data/test_data_pinns.h5', key='transm')
 atm_params = pd.read_hdf('data/test_data_pinns.h5', key='params')
 
-atmosphere = Radtrans(line_species=['H2O_HITEMP',
-                                    'CO_all_iso_HITEMP',
-                                    'CH4',
-                                    'CO2'],
-                      rayleigh_species=['H2', 'He'],
-                      continuum_opacities=['H2-H2', 'H2-He'],
-                      wlen_bords_micron=[0.3, 15],
-                      enable_pinn=True)
+radtrans_kwargs = dict(
+    line_species=['H2O'],  # testing with only H2O first due to grid mismatch
+    rayleigh_species=['H2', 'He'],
+    continuum_opacities=['H2-H2', 'H2-He'],
+    wavelength_boundaries=np.array([0.3, 15]),  # updated parameter name for v3
+    enable_pinn=True,
+)
+
+accepted = inspect.signature(Radtrans.__init__).parameters
+filtered_kwargs = {}
+for key, value in radtrans_kwargs.items():
+    if key in accepted:
+        filtered_kwargs[key] = value
+    else:
+        print(f"Warning: Radtrans.__init__ does not accept argument '{key}'; skipping.")
+
+atmosphere = Radtrans(**filtered_kwargs)
 
 if model_file is not None:
-    atmosphere.model = torch.load(os.path.join(model_file, 'TrainedModel/model.pkl'), map_location=atmosphere.dev)
+    if torch.cuda.is_available():
+        device = torch.device("cuda")
+    elif torch.backends.mps.is_available():
+        device = torch.device("mps")
+    else:
+        device = torch.device("cpu")
+    atmosphere.model = torch.load(os.path.join(model_file, 'TrainedModel/model.pkl'), map_location=device, weights_only=False)
 
 pressures = np.logspace(-6, 2, 100)
-atmosphere.setup_opa_structure(pressures)
+# atmosphere.setup_opa_structure(pressures)  # Not needed in newer petitRADTRANS versions
 
 MMWs = {}
 MMWs['H2'] = 2 * 1.008
 MMWs['He'] = 4.0026
-MMWs['H2O_HITEMP'] = 2 * 1.008 + 15.999
-MMWs['CO_all_iso_HITEMP'] = 12.011 + 15.999
+MMWs['H2O'] = 2 * 1.008 + 15.999
+MMWs['CO'] = 12.011 + 15.999
 MMWs['CO2'] = 12.011 + 2 * 15.999
 MMWs['CH4'] = 12.011 + 4 * 1.008
 
@@ -62,8 +85,8 @@ for i in tqdm(range(atm_params.shape[0])):
     temperature = atm_params['T'][i] * np.ones_like(pressures)
 
     vol_fractions = {}
-    vol_fractions['H2O_HITEMP'] = (10.0 ** atm_params['log(H2O)'][i])
-    vol_fractions['CO_all_iso_HITEMP'] = (10.0 ** atm_params['log(CO)'][i])
+    vol_fractions['H2O'] = (10.0 ** atm_params['log(H2O)'][i])
+    vol_fractions['CO'] = (10.0 ** atm_params['log(CO)'][i])
     vol_fractions['CO2'] = (10.0 ** atm_params['log(CO2)'][i])
     vol_fractions['CH4'] = (10.0 ** atm_params['log(CH4)'][i])
 
@@ -83,9 +106,8 @@ for i in tqdm(range(atm_params.shape[0])):
         mass_fractions[name] = frac * MMWs[name] / MMW
 
     torch.set_num_threads(4)
-    atmosphere.calc_transm(temperature, mass_fractions, gravity, MMW, R_pl=R_pl, P0_bar=P0)
-
-    transmission = atmosphere.transm_rad.copy()
+    atmosphere.pressures = pressures
+    transmission, _, _ = atmosphere.calculate_transit_radii(temperature, mass_fractions, MMW, gravity, P0, R_pl)
     err = transmission - true_transm.iloc[i, :]
 
     transm_radii.append(transmission)
